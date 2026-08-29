@@ -1,0 +1,23 @@
+{
+  "name": "vue-popup-ctrl",
+  "version": "1.0.0",
+  "description": "vue 弹窗控制组件",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kazeletter/vue-popup-ctrl.git"
+  },
+  "keywords": [
+    "vue",
+    "popup"
+  ],
+  "author": "kazeletter",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kazeletter/vue-popup-ctrl/issues"
+  },
+  "homepage": "https://github.com/kazeletter/vue-popup-ctrl#readme"
+}
