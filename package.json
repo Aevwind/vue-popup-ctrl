@@ -2,22 +2,46 @@
   "name": "vue-popup-ctrl",
   "version": "1.0.0",
   "description": "vue 弹窗控制组件",
-  "main": "index.js",
+  "main": "./dist/vue-popup-ctrl.umd.cjs",
+  "module": "./dist/vue-popup-ctrl.mjs",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "vite build"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kazeletter/vue-popup-ctrl.git"
+    "url": "https://github.com/aevwind/vue-popup-ctrl.git"
   },
   "keywords": [
     "vue",
+    "vue3",
+    "component",
     "popup"
   ],
-  "author": "kazeletter",
+  "author": "Aevwind",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/kazeletter/vue-popup-ctrl/issues"
+    "url": "https://github.com/aevwind/vue-popup-ctrl/issues"
   },
-  "homepage": "https://github.com/kazeletter/vue-popup-ctrl#readme"
+  "homepage": "https://github.com/aevwind/vue-popup-ctrl#readme",
+  "dependencies": {
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "sass-embedded": "^1.103.1",
+    "vite": "^8.2.2"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/vue-popup-ctrl.mjs",
+      "require": "./dist/vue-popup-ctrl.umd.cjs"
+    },
+    "./style.css": "./dist/vue-popup-ctrl.css"
+  }
 }
