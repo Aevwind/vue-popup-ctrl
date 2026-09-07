@@ -2,13 +2,19 @@
   "name": "vue-popup-ctrl",
   "version": "1.0.0",
   "description": "vue 弹窗控制组件",
-  "main": "./dist/vue-popup-ctrl.umd.cjs",
-  "module": "./dist/vue-popup-ctrl.mjs",
+  "main": "./dist/vue-popup-ctrl.umd.js",
+  "module": "./dist/vue-popup-ctrl.browser.mjs",
+  "types": "./dist/types/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "vite build"
+    "typecheck": "vue-tsc --noEmit",
+    "build": "npm run typecheck && vite build && vue-tsc -p tsconfig.build.json && node scripts/finalize-types.mjs",
+    "test:unit": "node --test tests/*.test.cjs",
+    "test:types": "tsc -p tests/types/tsconfig.json && tsc -p tests/types/tsconfig.bundler.json",
+    "test": "npm run build && npm run test:unit && npm run test:types",
+    "prepack": "npm test"
   },
   "repository": {
     "type": "git",
@@ -26,21 +32,37 @@
     "url": "https://github.com/aevwind/vue-popup-ctrl/issues"
   },
   "homepage": "https://github.com/aevwind/vue-popup-ctrl#readme",
-  "dependencies": {
-    "vue": "^3.5.42"
-  },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
     "sass-embedded": "^1.103.1",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vue": "^3.5.42",
+    "typescript": "~5.9.3",
+    "vue-tsc": "~3.3.11"
   },
   "peerDependencies": {
     "vue": "^3.5.0"
   },
   "exports": {
     ".": {
-      "import": "./dist/vue-popup-ctrl.mjs",
-      "require": "./dist/vue-popup-ctrl.umd.cjs"
+      "node": {
+        "import": {
+          "types": "./dist/types/index.d.mts",
+          "default": "./dist/vue-popup-ctrl.mjs"
+        },
+        "require": {
+          "types": "./dist/types/index.d.ts",
+          "default": "./dist/vue-popup-ctrl.umd.js"
+        }
+      },
+      "import": {
+        "types": "./dist/types/index.d.mts",
+        "default": "./dist/vue-popup-ctrl.browser.mjs"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/vue-popup-ctrl.browser.cjs"
+      }
     },
     "./style.css": "./dist/vue-popup-ctrl.css"
   }

@@ -1,6 +1,6 @@
 <!-- 弹窗控制 -->
 <template>
-  <Teleport to="body">
+  <Teleport v-if="mounted" to="body">
     <div class="popup_ctrl">
       <!-- <PopupItem v-for="item in popupList" :key="item.name" :popupItem="item"></PopupItem> -->
       <Transition
@@ -19,7 +19,7 @@
               '--mask-enter': setMaskColor(popupItem.option, popupItem.option.opacity)?.enter,
               '--mask-leave': setMaskColor(popupItem.option, popupItem.option.opacity)?.leave,
               '--opacity': popupItem.option.opacity,
-              zIndex: popupItem.option.zIndex || 99999 + popupItem.id,
+              zIndex: popupItem.option.zIndex ?? 99999 + popupItem.id,
             },
             popupItem.option.maskStyle,
           ]"
@@ -38,7 +38,9 @@
   </Teleport>
 </template>
 <script lang="ts" setup>
-import { computed, watch, inject, Transition, TransitionGroup } from 'vue'
+import { computed, watch, inject, ref, onMounted, onBeforeUnmount, normalizeStyle, Transition, TransitionGroup } from 'vue'
+import type { PopupConfig, PopupStore } from '../store/popup.js'
+import { updateBodyEffects } from './bodyEffects.js'
 // import { ORIGIN } from 'UTIL/index'
 // import confetti from 'canvas-confetti'
 
@@ -64,7 +66,9 @@ const $props = defineProps({
   },
 })
 
-const popupStore = inject('popupStore')
+const popupStore = inject<PopupStore>('popupStore')
+if (!popupStore) throw new Error('[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。')
+const mounted = ref(false)
 // 弹窗列表
 const popupList = computed(() => {
   // (window as any).popupStore = popupStore;
@@ -118,11 +122,14 @@ const defaultMaskColor = computed(() => {
 })
 
 // 設置遮罩顏色
-const setMaskColor = (option: any, opacity: number | string | undefined) => {
-  const background = option.maskStyle.background || option.maskStyle.backgroundColor || option.maskColor
-  if (background || opacity) {
-    const enter = toRgba(background || $props.maskColor, opacity ?? $props.opacity)
-    let leave = toRgba(background || $props.maskColor, 0)
+const setMaskColor = (option: PopupConfig, opacity: number | string | undefined) => {
+  const normalized = normalizeStyle([option.maskStyle])
+  const style = normalized && typeof normalized === 'object' ? normalized : {}
+  const background = style.background || style.backgroundColor || option.maskColor
+  if (background || opacity != null) {
+    const color = String(background || $props.maskColor)
+    const enter = toRgba(color, opacity ?? $props.opacity)
+    let leave = toRgba(color, 0)
     if (enter === leave) {
       leave = 'transparent'
     }
@@ -133,23 +140,20 @@ const setMaskColor = (option: any, opacity: number | string | undefined) => {
   }
 }
 
-watch(
-  popupList,
-  (val) => {
-    if (val.length) {
-      document.body.style.overflow = 'hidden'
-      if ($props.bgBlur) {
-        document.body.classList.add('filter-blur')
-      }
-    } else {
-      document.body.style.overflow = ''
-      if ($props.bgBlur) {
-        document.body.classList.remove('filter-blur')
-      }
-    }
-  },
-  { immediate: true, deep: true }
-)
+const bodyOwner = Symbol('PopupCtrl')
+let stopBodyWatch: (() => void) | undefined
+onMounted(() => {
+  mounted.value = true
+  stopBodyWatch = watch(
+    [() => popupList.value.length, () => $props.bgBlur],
+    ([count, blur]) => updateBodyEffects(bodyOwner, count > 0, blur),
+    { immediate: true, flush: 'post' }
+  )
+})
+onBeforeUnmount(() => {
+  stopBodyWatch?.()
+  updateBodyEffects(bodyOwner, false, false)
+})
 
 // 用於重置apng播放
 // let reloadApngCount = 0
@@ -192,7 +196,6 @@ const clickMask = (popupItem: any) => {
     canClose = true
   }
   if (canClose) {
-    popupItem.selfCloseIndex = -1
     popupItem.close()
   }
 }
