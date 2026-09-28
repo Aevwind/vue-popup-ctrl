@@ -7,8 +7,22 @@
         v-bind="popupItem.transitionConfig"
         v-for="popupItem in popupList"
         :key="popupItem.id"
-        @beforeEnter="animeEvent($event, 'beforeEnter', popupItem.transitionConfig.name || '', popupItem)"
-        @afterEnter="animeEvent($event, 'afterEnter', popupItem.transitionConfig.name || '', popupItem)"
+        @beforeEnter="
+          animeEvent(
+            $event,
+            'beforeEnter',
+            popupItem.transitionConfig.name || '',
+            popupItem,
+          )
+        "
+        @afterEnter="
+          animeEvent(
+            $event,
+            'afterEnter',
+            popupItem.transitionConfig.name || '',
+            popupItem,
+          )
+        "
       >
         <div
           class="popup_ctrl_mask"
@@ -16,8 +30,14 @@
           :key="popupItem.id"
           :style="[
             {
-              '--mask-enter': setMaskColor(popupItem.option, popupItem.option.opacity)?.enter,
-              '--mask-leave': setMaskColor(popupItem.option, popupItem.option.opacity)?.leave,
+              '--mask-enter': setMaskColor(
+                popupItem.option,
+                popupItem.option.opacity,
+              )?.enter,
+              '--mask-leave': setMaskColor(
+                popupItem.option,
+                popupItem.option.opacity,
+              )?.leave,
               '--opacity': popupItem.option.opacity,
               zIndex: popupItem.option.zIndex ?? 99999 + popupItem.id,
             },
@@ -27,20 +47,42 @@
           v-if="popupItem.show"
         >
           <div class="popup_ctrl_content" v-if="popupItem.name">
-            <Component v-on="popupItem.event" v-bind="popupItem.data" :is="popupItem.name" :popupId="popupItem.id" :ref="popupItem.onRef"></Component>
+            <Component
+              v-on="popupItem.event"
+              v-bind="popupItem.data"
+              :is="popupItem.name"
+              :popupId="popupItem.id"
+              :ref="popupItem.onRef"
+            ></Component>
           </div>
         </div>
       </Transition>
       <transition-group :duration="300">
-        <span class="popup_ctrl_toast" v-for="item in toastList" :key="item.id" :style="{ zIndex: 99999 + item.id }">{{ item.text }}</span>
+        <span
+          class="popup_ctrl_toast"
+          v-for="item in toastList"
+          :key="item.id"
+          :style="{ zIndex: 99999 + item.id }"
+          >{{ item.text }}</span
+        >
       </transition-group>
     </div>
   </Teleport>
 </template>
 <script lang="ts" setup>
-import { computed, watch, inject, ref, onMounted, onBeforeUnmount, normalizeStyle, Transition, TransitionGroup } from 'vue'
-import type { PopupConfig, PopupStore } from '../store/popup.js'
-import { updateBodyEffects } from './bodyEffects.js'
+import {
+  computed,
+  watch,
+  inject,
+  ref,
+  onMounted,
+  onBeforeUnmount,
+  normalizeStyle,
+  Transition,
+  TransitionGroup,
+} from "vue";
+import type { PopupConfig, PopupStore } from "../store/popup.js";
+import { updateBodyEffects } from "./bodyEffects.js";
 // import { ORIGIN } from 'UTIL/index'
 // import confetti from 'canvas-confetti'
 
@@ -52,7 +94,7 @@ const $props = defineProps({
   },
   maskColor: {
     type: String,
-    default: '#000000',
+    default: "#000000",
   },
   /** 開啟背景模糊, body下元素添加dis_popup_blur類名可不模糊 */
   bgBlur: {
@@ -64,96 +106,105 @@ const $props = defineProps({
     type: Number,
     default: 0.8,
   },
-})
+});
 
-const popupStore = inject<PopupStore>('popupStore')
-if (!popupStore) throw new Error('[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。')
-const mounted = ref(false)
+const popupStore = inject<PopupStore>("popupStore");
+if (!popupStore)
+  throw new Error("[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。");
+const mounted = ref(false);
 // 弹窗列表
 const popupList = computed(() => {
   // (window as any).popupStore = popupStore;
-  return popupStore.popupList
-})
+  return popupStore.popupList;
+});
 // toast列表
-const toastList = computed(() => popupStore.toastList)
+const toastList = computed(() => popupStore.toastList);
 
-const toRgba = (color: string, opacity: number|string) => {
-  const hexColorReg = /^#([0-9a-fA-f]{3,8})$/
-  const rgbColorReg = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,?\s*([\.0-9]{1,3})?\s*\)$/
+const toRgba = (color: string, opacity: number | string) => {
+  const hexColorReg = /^#([0-9a-fA-f]{3,8})$/;
+  const rgbColorReg =
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,?\s*([\.0-9]{1,3})?\s*\)$/;
   if (hexColorReg.test(color)) {
     const hexStr = color.slice(1);
-    const singlehex = hexStr.length === 3 || hexStr.length === 4
+    const singlehex = hexStr.length === 3 || hexStr.length === 4;
 
-    const rgbList = hexStr.match(singlehex ? /.{1}/g : /.{2}/g)?.map((item, i) => {
-      let hexItem = item
-      if (singlehex) {
-        hexItem += item
-      }
-      if (i === 3) {
-        return parseInt(hexItem, 16) / 255
-      }
-      return parseInt(hexItem, 16)
-    }) || [];
-    opacity = isNaN(Number(opacity)) ? rgbList.join(',')[3] || opacity : opacity
-    return `rgba(${rgbList.slice(0, 3).join(',')},${opacity})`
+    const rgbList =
+      hexStr.match(singlehex ? /.{1}/g : /.{2}/g)?.map((item, i) => {
+        let hexItem = item;
+        if (singlehex) {
+          hexItem += item;
+        }
+        if (i === 3) {
+          return parseInt(hexItem, 16) / 255;
+        }
+        return parseInt(hexItem, 16);
+      }) || [];
+    opacity = isNaN(Number(opacity))
+      ? rgbList.join(",")[3] || opacity
+      : opacity;
+    return `rgba(${rgbList.slice(0, 3).join(",")},${opacity})`;
   } else if (rgbColorReg.test(color)) {
     const rgba = color.replace(rgbColorReg, (_, r, g, b, a) => {
       if (a) {
-        return `rgba(${r},${g},${b},${isNaN(Number(opacity)) ? a : opacity})`
+        return `rgba(${r},${g},${b},${isNaN(Number(opacity)) ? a : opacity})`;
       }
-      return `rgba(${r},${g},${b},${opacity})`
-    })
-    return rgba
+      return `rgba(${r},${g},${b},${opacity})`;
+    });
+    return rgba;
   } else {
-    return color
+    return color;
   }
-}
+};
 
 const defaultMaskColor = computed(() => {
-  const enter = toRgba($props.maskColor, $props.opacity)
-  let leave = toRgba($props.maskColor, 0)
+  const enter = toRgba($props.maskColor, $props.opacity);
+  let leave = toRgba($props.maskColor, 0);
   if (enter === leave) {
-    leave = 'transparent'
+    leave = "transparent";
   }
   return {
     enter,
     leave,
-  }
-})
+  };
+});
 
 // 設置遮罩顏色
-const setMaskColor = (option: PopupConfig, opacity: number | string | undefined) => {
-  const normalized = normalizeStyle([option.maskStyle])
-  const style = normalized && typeof normalized === 'object' ? normalized : {}
-  const background = style.background || style.backgroundColor || option.maskColor
+const setMaskColor = (
+  option: PopupConfig,
+  opacity: number | string | undefined,
+) => {
+  const normalized = normalizeStyle([option.maskStyle]);
+  const style = normalized && typeof normalized === "object" ? normalized : {};
+  const background =
+    style.background || style.backgroundColor || option.maskColor;
   if (background || opacity != null) {
-    const color = String(background || $props.maskColor)
-    const enter = toRgba(color, opacity ?? $props.opacity)
-    let leave = toRgba(color, 0)
+    const color = String(background || $props.maskColor);
+    const enter = toRgba(color, opacity ?? $props.opacity);
+    let leave = toRgba(color, 0);
     if (enter === leave) {
-      leave = 'transparent'
+      leave = "transparent";
     }
     return {
       enter,
       leave,
-    }
+    };
   }
-}
+};
 
-const bodyOwner = Symbol('PopupCtrl')
-let stopBodyWatch: (() => void) | undefined
+const bodyOwner = Symbol("PopupCtrl");
+let stopBodyWatch: (() => void) | undefined;
 onMounted(() => {
-  mounted.value = true
+  mounted.value = true;
   stopBodyWatch = watch(
     [() => popupList.value.length, () => $props.bgBlur],
     ([count, blur]) => updateBodyEffects(bodyOwner, count > 0, blur),
-    { immediate: true, flush: 'post' }
-  )
-})
+    { immediate: true, flush: "post" },
+  );
+});
 onBeforeUnmount(() => {
-  stopBodyWatch?.()
-  updateBodyEffects(bodyOwner, false, false)
-})
+  stopBodyWatch?.();
+  updateBodyEffects(bodyOwner, false, false);
+});
 
 // 用於重置apng播放
 // let reloadApngCount = 0
@@ -164,19 +215,19 @@ onBeforeUnmount(() => {
 // 爆炸特效
 // const boomApng = `url(${isLocal ? ORIGIN : ''}/img/apng/boom.png?v=${reloadApngCount++ % 2})`
 const animeEvent = (el: any, type: string, name: string, popupItem: any) => {
-  const { option } = popupItem
+  const { option } = popupItem;
   // boom 播放apng動畫
-  if (name === 'boom') {
-    if (type === 'beforeEnter') {
-      el.style.backgroundPosition = `center center`
+  if (name === "boom") {
+    if (type === "beforeEnter") {
+      el.style.backgroundPosition = `center center`;
       // el.style.backgroundImage = boomApng
-    } else if (type === 'afterEnter') {
-      el.style.backgroundImage = ''
+    } else if (type === "afterEnter") {
+      el.style.backgroundImage = "";
     }
   }
   // confetti 播放禮炮特效
-  if (name === 'confetti' && option.confettiConf) {
-    if (type === 'beforeEnter') {
+  if (name === "confetti" && option.confettiConf) {
+    if (type === "beforeEnter") {
       // option.confettiConf.forEach((confettiConf) => {
       //   confetti(
       //     Object.assign({}, toRaw(confettiConf), {
@@ -186,29 +237,43 @@ const animeEvent = (el: any, type: string, name: string, popupItem: any) => {
       // })
     }
   }
-}
+};
 
 // 點擊遮罩判斷
 const clickMask = (popupItem: any) => {
-  let canClose = popupItem.option.maskClose
+  let canClose = popupItem.option.maskClose;
   // 默認點擊關閉
-  if ($props.maskClose && typeof canClose !== 'boolean') {
-    canClose = true
+  if ($props.maskClose && typeof canClose !== "boolean") {
+    canClose = true;
   }
   if (canClose) {
-    popupItem.close()
+    popupItem.close();
   }
-}
+};
 </script>
 <style lang="scss">
+
 // 背景模糊
-body.filter-blur > :not(.popup_ctrl):not(.dis_popup_blur),
-body.filter-blur > .popup_ctrl > :not(.popup_ctrl_toast) {
-  filter: blur(5px);
-}
-body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
-  filter: none;
-}
+
+/* 支持 backdrop-filter */
+// @supports (backdrop-filter: blur(5px)) or (-webkit-backdrop-filter: blur(5px)) {
+//   body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
+//     backdrop-filter: blur(5px);
+//   }
+// }
+
+/* 完全不支持 backdrop-filter */
+@supports not (
+  (backdrop-filter: blur(5px)) or (-webkit-backdrop-filter: blur(5px))
+) {}
+  body.filter-blur > :not(.popup_ctrl):not(.dis_popup_blur),
+  body.filter-blur > .popup_ctrl > :not(.popup_ctrl_toast) {
+    filter: blur(5px);
+  }
+  body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
+    filter: none;
+  }
+
 
 .popup_ctrl {
   z-index: 9999;
@@ -226,7 +291,7 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: var(--mask-enter, v-bind('defaultMaskColor.enter'));
+    background: var(--mask-enter, v-bind("defaultMaskColor.enter"));
     display: flex;
     &.none {
       align-items: center;
@@ -243,7 +308,10 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
       }
       &-enter-from,
       &-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave')) !important;
+        background: var(
+          --mask-leave,
+          v-bind("defaultMaskColor.leave")
+        ) !important;
         .popup_ctrl_content {
           transform: scale(0.2);
         }
@@ -259,7 +327,10 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
       }
       &-enter-from,
       &-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave')) !important;
+        background: var(
+          --mask-leave,
+          v-bind("defaultMaskColor.leave")
+        ) !important;
         .popup_ctrl_content {
           transform: translateY(100%);
         }
@@ -308,7 +379,10 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
       }
       &.bounce-enter-from,
       &.bounce-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave')) !important;
+        background: var(
+          --mask-leave,
+          v-bind("defaultMaskColor.leave")
+        ) !important;
       }
       // &.v-enter-from,
       &.bounce-leave-to {
@@ -333,10 +407,12 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
       //   repeat: no-repeat;
       // }
       .popup_ctrl_content {
-        transition: transform 0.3s linear 0.5s, opacity 0.3s linear 0.5s;
+        transition:
+          transform 0.3s linear 0.5s,
+          opacity 0.3s linear 0.5s;
       }
       &.boom-enter-from {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave'));
+        background: var(--mask-leave, v-bind("defaultMaskColor.leave"));
         .popup_ctrl_content {
           opacity: 0;
           transform: scale(0.2);
@@ -345,9 +421,11 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
       // &.boom-enter-active {
       // }
       &.boom-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave'));
+        background: var(--mask-leave, v-bind("defaultMaskColor.leave"));
         .popup_ctrl_content {
-          transition: transform 0.3s, opacity 0.3s;
+          transition:
+            transform 0.3s,
+            opacity 0.3s;
           opacity: 0;
           transform: scale(0.2);
         }
@@ -363,7 +441,10 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
 
       &.light-enter-from,
       &.light-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave')) !important;
+        background: var(
+          --mask-leave,
+          v-bind("defaultMaskColor.leave")
+        ) !important;
       }
       &.light-leave-to {
         .popup_ctrl_content {
@@ -378,7 +459,10 @@ body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
 
       &.confetti-enter-from,
       &.confetti-leave-to {
-        background: var(--mask-leave, v-bind('defaultMaskColor.leave')) !important;
+        background: var(
+          --mask-leave,
+          v-bind("defaultMaskColor.leave")
+        ) !important;
       }
       &.confetti-leave-to {
         .popup_ctrl_content {

@@ -274,8 +274,8 @@ var V = { class: "popup_ctrl" }, H = ["onClick"], U = {
 	},
 	setup(u) {
 		T((e) => ({
-			v51f18cdc: N.value.enter,
-			v5134fd1e: N.value.leave
+			v3215b2ee: N.value.enter,
+			v3273facd: N.value.leave
 		}));
 		let p = u, y = d("popupStore");
 		if (!y) throw Error("[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。");

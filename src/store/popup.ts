@@ -717,7 +717,7 @@ function createPopupStore() {
       toastObject.start();
       return toastObject;
     }
-    props(props: Record<string, any>) {
+    props <Name extends string>(props: DefineProps<Name>) {
       this.dataCache = props; // 弹窗数据
       return this;
     }

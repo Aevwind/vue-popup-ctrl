@@ -214,7 +214,7 @@ declare const usePopupStore: (popupConfig?: PopupConfig) => {
     bottom<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
     close(id?: number): RuntimePopupObject | null;
     toast(text: string, config?: ToastConfig | number): ToastObject;
-    props(props: Record<string, any>): /*elided*/ any;
+    props<Name extends string>(props: DefineProps<Name>): /*elided*/ any;
     config(config: PopupConfig): /*elided*/ any;
 };
 export type PopupStore = ReturnType<typeof usePopupStore>;
