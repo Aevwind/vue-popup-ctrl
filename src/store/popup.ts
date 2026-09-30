@@ -11,7 +11,13 @@ import type {
   DefineEmits,
   DefineProps,
   PopupInstance,
-  PopupCompsKey
+  ComponentName,
+  PopupData,
+  PopupCacheCheck,
+  PopupOpenArgs,
+  PopupInput,
+  PopupCreateData,
+  PopupReuseData
 } from './popup.types.js';
 import { readStorage, writeStorage, storageNamespace } from './storage.js';
 
@@ -101,19 +107,6 @@ export interface PopupConfig {
 //     : never
 //   : never;
 
-/** 解析字符串参数 */
-type SplitParams<Str extends string> = Str extends `${infer Name}?${infer Params}`
-  ? [Name, FormatParams<Params>]
-  : [Str, any];
-type FormatParams<Str extends string> = Str extends `${infer Param1}&${infer Param2}`
-  ? ForamtValue<Param1> & FormatParams<Param2>
-  : ForamtValue<Str>;
-type ForamtValue<Str extends string> = Str extends `${infer Name}=${infer Value}`
-  ? { [T in Name]: Value }
-  : { [T in Str]: true };
-/** 获取组件名字 */
-type FormatName<Name extends string> = SplitParams<Name>[0];
-
 /** 获取参数 */
 type GetObjectParams<T, K, D = never> = K extends keyof T ? Pick<T, K>[K] : D;
 type GetFunctionParams<T, K = never, D = never> = T extends (...args: any[]) => any
@@ -162,8 +155,8 @@ type DefaultEmitEvent = {
 //   : never;
 
 /** 對外統一返回的響應式彈窗句柄 */
-type ReturnPopupObject<Name extends string = string> = Omit<
-  PopupObject<Name>,
+type ReturnPopupObject<Name extends string = string, Data = PopupData<Name>> = Omit<
+  PopupObject<Name, Data>,
   'show' | 'ref'
 > & {
   show: boolean;
@@ -172,9 +165,11 @@ type ReturnPopupObject<Name extends string = string> = Omit<
 
 function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>>(
   target: T = {} as T,
-  source: T1
+  source: T1,
+  copies = new WeakMap<object, any>()
 ): T & T1 {
   const result = (isObject(target) ? target : {}) as any;
+  if (isObject(source)) copies.set(source, result);
 
   for (const key in source) {
     if (Object.prototype.hasOwnProperty.call(source, key)
@@ -184,9 +179,10 @@ function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>
       const targetValue = Object.prototype.hasOwnProperty.call(result, key) ? result[key] : undefined;
 
       if (isObject(sourceValue)) {
-        // 如果目标值不是对象，则初始化为空对象
-        // 递归合并
-        result[key] = deepMerge(isObject(targetValue) ? targetValue : {}, sourceValue);
+        result[key] = copies.get(sourceValue)
+          || deepMerge(isObject(targetValue) ? targetValue : {}, sourceValue, copies);
+      } else if (Array.isArray(sourceValue)) {
+        result[key] = copyConfigArray(sourceValue, copies);
       } else {
         // 非对象直接赋值
         result[key] = sourceValue;
@@ -196,6 +192,31 @@ function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>
 
   return result;
 }
+
+/** 配置数组也独立复制，避免默认配置、调用者与弹窗互相影响。 */
+function copyConfigArray(source: any[], copies: WeakMap<object, any>): any[] {
+  if (copies.has(source)) return copies.get(source);
+  const result: any[] = [];
+  copies.set(source, result);
+  source.forEach((value, index) => {
+    result[index] = Array.isArray(value)
+      ? copyConfigArray(value, copies)
+      : isObject(value) ? copies.get(value) || deepMerge({}, value, copies) : value;
+  });
+  return result;
+}
+
+function freezeConfig<T>(value: T, visited = new WeakSet<object>()): T {
+  if ((isObject(value) || Array.isArray(value)) && !visited.has(value)) {
+    visited.add(value);
+    Object.values(value).forEach(item => freezeConfig(item, visited));
+    Object.freeze(value);
+  }
+  return value;
+}
+
+type ReadonlyConfig<T, Depth extends unknown[] = []> = Depth['length'] extends 5 ? T
+  : T extends object ? { readonly [K in keyof T]: ReadonlyConfig<T[K], [...Depth, unknown]> } : T;
 
 /** props 仅合并顶层，保留嵌套数据的引用及其响应式行为。 */
 function mergeProps(...sources: (Record<string, any> | null | undefined)[]): Record<string, any> {
@@ -219,18 +240,18 @@ function isObject(value: any): value is Record<string, any> {
 }
 
 /** 创建弹窗对象 */
-class PopupObject<Name extends string> {
+class PopupObject<Name extends string, Data = PopupData<Name>> {
   /** 簡單合併兩個對象 */
   static deepMerge = deepMerge;
   show = ref(false);
   /** 彈窗id */
   id: number;
   /** 弹窗名称 */
-  name: Name;
+  name: ComponentName<Name>;
   /** 完整名称，用于区分 query 不同的弹窗。 */
   key: string;
   /** 弹窗数据 */
-  data: DefineProps<Name>;
+  data: Data;
   /** 彈窗組件 */
   ref = ref<PopupInstance<Name>>();
   /** disabled */
@@ -257,13 +278,13 @@ class PopupObject<Name extends string> {
       }
     ]
   };
-  /** close 回调中再次调用句柄 close() 时直接关闭，避免递归。 */
+  /** 同步 close 回调中再次调用句柄 close() 时直接关闭，避免递归。 */
   private closeEventDepth = 0;
   /** 窗口控制方法掛載 */
   private closeCtrlFn = (..._: any[]) => undefined;
   /** 事件列表 **/
   event: Record<string, ((...args: any[]) => any)[]> = Object.create(null);
-  private listeners: Record<string, { source?: (...args: any[]) => any; handler: (...args: any[]) => any }[]> = Object.create(null);
+  private listeners: Record<string, { active: boolean; source?: (...args: any[]) => any; handler: (...args: any[]) => any }[]> = Object.create(null);
   /**
    *
    * @param id 彈窗id
@@ -274,8 +295,8 @@ class PopupObject<Name extends string> {
    */
   constructor(
     id: number,
-    name: Name,
-    props: DefineProps<Name>,
+    name: ComponentName<Name>,
+    props: Data,
     option: PopupConfig,
     closeCtrlFn: (...args: any[]) => any,
     key: string = name
@@ -308,18 +329,25 @@ class PopupObject<Name extends string> {
     };
   }
   private addListener(event: string, listener: (...args: any[]) => any, source?: (...args: any[]) => any) {
-    const handler = event === 'close' ? (...args: any[]) => {
-      this.closeEventDepth++;
-      try {
-        return listener(...args);
-      } finally {
-        this.closeEventDepth--;
+    const record = { active: true, source, handler: (..._: any[]): any => undefined };
+    const handler = (...args: any[]) => {
+      if (!record.active) return;
+      if (event === 'close') {
+        this.closeEventDepth++;
+        try {
+          return listener(...args);
+        } finally {
+          this.closeEventDepth--;
+        }
       }
-    } : listener;
+      return listener(...args);
+    };
+    record.handler = handler;
     (this.event[event] ??= []).push(handler);
-    (this.listeners[event] ??= []).push({ source, handler });
+    (this.listeners[event] ??= []).push(record);
     return () => {
       // Vue 派发时遍历原数组；替换数组避免清理时跳过其它监听。
+      record.active = false;
       this.event[event] = (this.event[event] || []).filter(item => item !== handler);
       this.listeners[event] = (this.listeners[event] || []).filter(record => record.handler !== handler);
     };
@@ -339,7 +367,7 @@ class PopupObject<Name extends string> {
         GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => any>
       >,
       0
-    >
+    > | undefined
   >;
   /**
    * 註冊監聽$emit事件, 觸發在組件上使用$emit('事件名')觸發事件
@@ -354,7 +382,7 @@ class PopupObject<Name extends string> {
       EventType,
       GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => void>
     >
-  ): ReturnPopupObject<Name>;
+  ): ReturnPopupObject<Name, Data>;
   on<EventType extends string>(
     event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType,
     callback?: GetObjectParams<
@@ -376,12 +404,12 @@ class PopupObject<Name extends string> {
           removeListeners.forEach(remove => remove());
           settle();
         };
-        if (event === 'close') {
+        if (this.disabled) {
+          finish(() => resolve(undefined));
+        } else if (event === 'close') {
           removeListeners.push(this.addListener(eventName, () => {
             finish(() => resolve(close));
           }));
-        } else if (this.disabled) {
-          finish(() => resolve(undefined));
         } else {
           removeListeners.push(this.addListener('close', () => {
             finish(() => reject(close));
@@ -395,15 +423,14 @@ class PopupObject<Name extends string> {
     if (event === 'close') {
       // 將窗口關閉方法作為參數傳入
       this.addListener(eventName, (...args: any[]) => {
-        (callback as any).call(this, this.closeCtrlFn.bind(this, this.id), ...args);
+        return (callback as any).call(this, this.closeCtrlFn.bind(this, this.id), ...args);
       }, callback as (...args: any[]) => any);
     } else {
-      this.addListener(eventName, callback as (...args: any[]) => any, callback as (...args: any[]) => any);
-      if (this.disabled) {
-        callback?.();
+      if (!this.disabled) {
+        this.addListener(eventName, callback as (...args: any[]) => any, callback as (...args: any[]) => any);
       }
     }
-    return this as unknown as ReturnPopupObject<Name>;
+    return this as unknown as ReturnPopupObject<Name, Data>;
   }
   /**
    * 解綁監聽$emit事件
@@ -414,16 +441,17 @@ class PopupObject<Name extends string> {
   un<EventType extends string>(
     event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType,
     func: any
-  ): ReturnPopupObject<Name> {
-    if (typeof func !== 'function') return this as unknown as ReturnPopupObject<Name>;
+  ): ReturnPopupObject<Name, Data> {
+    if (typeof func !== 'function') return this as unknown as ReturnPopupObject<Name, Data>;
     const records = this.listeners[event as string];
     const index = records?.findIndex(record => record.source === func) ?? -1;
     if (index > -1) {
-      const [record] = records.splice(index, 1);
-      const handlerIndex = this.event[event as string]?.indexOf(record.handler) ?? -1;
-      if (handlerIndex > -1) this.event[event as string].splice(handlerIndex, 1);
+      const record = records[index];
+      record.active = false;
+      this.listeners[event as string] = records.filter(item => item !== record);
+      this.event[event as string] = (this.event[event as string] || []).filter(item => item !== record.handler);
     }
-    return this as unknown as ReturnPopupObject<Name>;
+    return this as unknown as ReturnPopupObject<Name, Data>;
   }
   /**
    * 獲取組件實例
@@ -431,35 +459,47 @@ class PopupObject<Name extends string> {
    * @returns this
    */
   onRef = (el: any) => {
-    this.ref.value = el;
+    this.ref.value = el ?? undefined;
   };
   /** 手動關閉窗口 */
-  close = (...args: any[]) => {
+  close = (...args: any[]): void | Promise<void> => {
     /** 在close方法內調用處理 */
     if (this.closeEventDepth > 0) {
       this.closeCtrlFn.call(this, this.id, ...args);
     } else {
-      this.event['close']?.slice().forEach(fn => {
-        fn.call(this, ...args);
-      });
+      const pending: Promise<unknown>[] = [];
+      for (const fn of this.event['close']?.slice() || []) {
+        try {
+          const result = fn.call(this, ...args);
+          if (result != null && typeof result.then === 'function') {
+            pending.push(Promise.resolve(result));
+          }
+        } catch (error) {
+          if (!pending.length) throw error;
+          // 已启动的异步监听也必须接入错误处理，避免同步异常遗留拒绝。
+          pending.push(Promise.reject(error));
+          break;
+        }
+      }
+      if (pending.length) return Promise.all(pending).then(() => undefined);
     }
   };
   /**
    * 傳組件數據
    * @param {DefineProps<Name>} props 組件數據
    */
-  props(props: DefineProps<Name>): ReturnPopupObject<Name> {
-    this.data = shallowReactive(props);
-    return this as unknown as ReturnPopupObject<Name>;
+  props(props: DefineProps<Name>): ReturnPopupObject<Name, DefineProps<Name>> {
+    this.data = shallowReactive(props) as Data;
+    return this as unknown as ReturnPopupObject<Name, DefineProps<Name>>;
   }
   /**
    * 設置彈窗配置
    * @param {PopupConfig} config 彈窗配置
    */
-  config(config: PopupConfig): ReturnPopupObject<Name> {
+  config(config: PopupConfig): ReturnPopupObject<Name, Data> {
     this.option = PopupObject.deepMerge(this.option, config || {});
     this.initTransitionConfig();
-    return this as unknown as ReturnPopupObject<Name>;
+    return this as unknown as ReturnPopupObject<Name, Data>;
   }
 }
 
@@ -477,7 +517,7 @@ type RuntimePopupObject = {
   option: PopupConfig;
   event: Record<string, ((...args: any[]) => any)[]>;
   onRef: (el: any) => any;
-  close: (...args: any[]) => void;
+  close: (...args: any[]) => void | Promise<void>;
 };
 
 export type ToastConfig = {
@@ -527,242 +567,276 @@ class ToastObject {
   }
 }
 
-function createPopupStore() {
+const popupList: RuntimePopupObject[] = reactive([]);
+const toastList: Array<ToastObject> = reactive([]);
+const popupIndex = ref(1);
 
-  const popupList: RuntimePopupObject[] = reactive([]);
-  const toastList: Array<ToastObject> = reactive([]);
-  const popupIndex = ref(1);
-  // 當前正在關閉的彈窗id
+type PropsCache = { data: Record<string, unknown>; active: boolean };
+type StoreCaches = { props?: PropsCache; config?: PopupConfig };
+type PopupSingleConfig = Omit<PopupConfig, 'only'> & { only?: false };
 
-  class Store {
-    popupConfig = {};
-    popupIndex = popupIndex;
-    popupList = popupList;
-    toastList = toastList;
-    /** 緩存數據 */
-    dataCache: any = null;
-    /** 緩存配置 */
-    configCache: any = null;
-    constructor(popupConfig: PopupConfig) {
-      this.popupConfig = popupConfig;
+// 缓存视图绑定创建时的令牌，避免其它链覆盖后读到类型不同的数据。
+class Store<Cache extends object = {}, Scoped extends boolean = false> {
+  private readonly defaults: PopupConfig;
+  private readonly caches: StoreCaches;
+  private readonly propsToken?: PropsCache;
+  get popupConfig(): ReadonlyConfig<PopupConfig> { return this.defaults; }
+  popupIndex = popupIndex;
+  popupList = popupList;
+  toastList = toastList;
+  constructor(popupConfig: PopupConfig, caches: StoreCaches = {}, propsToken?: PropsCache) {
+    this.defaults = freezeConfig(PopupObject.deepMerge({}, popupConfig));
+    this.caches = caches;
+    this.propsToken = propsToken;
+  }
+  createPopup<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+  createPopup<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  createPopup(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(popupName, popupData, popupConfig);
+  }
+  private createPopupRuntime(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
+    let configClone = PopupObject.deepMerge({}, this.defaults);
+    if (this.caches.config) {
+      configClone = PopupObject.deepMerge(configClone, this.caches.config);
+      delete this.caches.config;
     }
-    createPopup<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      let configClone = PopupObject.deepMerge({}, this.popupConfig);
-      if (this.configCache) {
-        configClone = PopupObject.deepMerge(configClone, this.configCache);
-        this.configCache = null;
-      }
-      const cachedProps = this.dataCache;
-      this.dataCache = null;
-      popupConfig = PopupObject.deepMerge(configClone, popupConfig);
-      // if (!popupName) return '';
-      const popupId = this.popupIndex.value++;
-      const query: SplitParams<typeof popupName>[1] = {};
-      let name: SplitParams<typeof popupName>[0] = popupName as SplitParams<typeof popupName>[0];
-      // 彈窗名後面拼參數
-      if (name.indexOf('?') > -1) {
-        let search = '';
-        [name as any, search as any] = String(popupName).split('?');
-        search.split('&').forEach(item => {
-          const [key = '', value] = item.split('=');
-          query[key] = value || true;
-        });
-      }
-      // 配置了只能存在一個同名彈窗
-      if (popupConfig?.only) {
-        const [popup] = this.popupList.filter(
-          popup => popup.key === popupName && !popup.closing
-        );
-        if (popup) {
-          return popup as ReturnPopupObject<FormatName<Name>>;
-        }
-      }
-      // 創建窗口對象
-      const rawPopupObject = new PopupObject(
-        popupId,
-        name as FormatName<Name>,
-        mergeProps(cachedProps, popupData, query) as DefineProps<FormatName<Name>>,
-        popupConfig,
-        this.close.bind(this),
-        popupName
-      );
-      const popupObject = reactive(
-        rawPopupObject as unknown as RuntimePopupObject
-      ) as unknown as ReturnPopupObject<FormatName<Name>>;
-      /** 彈窗類型处理关闭事件 */
-      if (popupConfig.type === 'daily') {
-        const storeName = `${storageNamespace()}_${popupName}_daily_open_time`;
-        const prevDayTime = readStorage(storeName) || 0;
-        const curDayTime = new Date().setHours(0, 0, 0, 0);
-        popupObject.disabled = curDayTime <= Number(prevDayTime);
-        popupObject.on('close', (_, val) => {
-          if (val) {
-            writeStorage(storeName, null);
-          } else {
-            writeStorage(storeName, curDayTime.toString());
-          }
-          /** 沒有其它關閉事件才觸發 */
-          if (popupObject.event.close?.length === 1) {
-            this.close(popupObject.id);
-          }
-        });
-      } else if (popupConfig.type === 'once') {
-        const storeName = `${storageNamespace()}_${popupName}_once`;
-        const storeVal = readStorage(storeName);
-        popupObject.disabled = Boolean(Number(storeVal));
-        popupObject.on('close', (_, val) => {
-          if (val) {
-            writeStorage(storeName, null);
-          } else {
-            writeStorage(storeName, '1');
-          }
-          /** 沒有其它關閉事件才觸發 */
-          if (popupObject.event.close?.length === 1) {
-            this.close(popupObject.id);
-          }
-        });
-      } else {
-        // 默認關閉窗口事件
-        popupObject.on('close', () => {
-          /** 沒有其它關閉事件才觸發 */
-          if (popupObject.event.close?.length === 1) {
-            this.close(popupObject.id);
-          }
-        });
-      }
-
-      if (!popupObject.disabled) {
-        this.popupList.push(popupObject as unknown as RuntimePopupObject);
-        nextTick(() => {
-          if (!popupObject.closing) {
-            popupObject.show = true;
-          }
-        });
-      }
-      return popupObject;
+    const token = this.propsToken ?? this.caches.props;
+    const cachedProps = token?.active ? token.data : undefined;
+    if (token) {
+      token.active = false;
+      if (this.caches.props === token) delete this.caches.props;
     }
-    open<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      return this.createPopup(popupName, popupData, popupConfig);
-    }
-    only<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      return this.createPopup(
-        popupName,
-        popupData,
-        PopupObject.deepMerge(popupConfig, { only: true })
-      );
-    }
-    daily<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      return this.createPopup(
-        popupName,
-        popupData,
-        PopupObject.deepMerge(popupConfig, { type: 'daily' })
-      );
-    }
-    once<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      return this.createPopup(
-        popupName,
-        popupData,
-        PopupObject.deepMerge(popupConfig, { type: 'once' })
-      );
-    }
-    bottom<Name extends string>(
-      popupName: Name | PopupCompsKey,
-      popupData?: DefineProps<Name>,
-      popupConfig: PopupConfig = {}
-    ): ReturnPopupObject<FormatName<Name>> {
-      return this.createPopup(
-        popupName,
-        popupData,
-        Object.assign(popupConfig, { anime: 'bottom' })
-      );
-    }
-    close(id = -1): RuntimePopupObject | null {
-      let popup: RuntimePopupObject | null = null;
-      // 沒有傳id關閉最後一個
-      if (id === -1) {
-        for (let i = this.popupList.length - 1; i >= 0; i--) {
-          const item = this.popupList[i];
-          if (item && !item.closing) {
-            popup = item;
-            break;
-          }
-        }
-      } else {
-        popup = this.popupList.find(item => item.id === id) || null;
-      }
-      if (popup && !popup.closing) {
-        const popupId = popup.id;
-        popup.closing = true;
-        popup.show = false;
-        nextTick(() => {
-          const index = this.popupList.findIndex(item => item.id === popupId);
-          if (index > -1) this.popupList.splice(index, 1);
-        });
-      }
-      return popup;
-    }
-    toast(text: string, config?: ToastConfig | number): ToastObject {
-      const toastId = this.popupIndex.value++;
-      const toastObject = new ToastObject(toastId, text, config, () => {
-        const index = this.toastList.findIndex(toastObj => toastObj.id === toastId);
-        if (index > -1) {
-          return this.toastList.splice(index, 1);
-        }
-        return false;
+    popupConfig = PopupObject.deepMerge(configClone, popupConfig);
+    // if (!popupName) return '';
+    const popupId = this.popupIndex.value++;
+    const query: Record<string, string | true> = {};
+    let name: string = popupName;
+    // 彈窗名後面拼參數
+    if (name.indexOf('?') > -1) {
+      let search = '';
+      [name, search] = String(popupName).split('?');
+      search.split('&').forEach(item => {
+        const [key = '', value] = item.split('=');
+        query[key] = value || true;
       });
-      this.toastList.push(toastObject);
-      toastObject.start();
-      return toastObject;
     }
-    props <Name extends string>(props: DefineProps<Name>) {
-      this.dataCache = props; // 弹窗数据
-      return this;
+    // 配置了只能存在一個同名彈窗
+    if (popupConfig?.only) {
+      const [popup] = this.popupList.filter(
+        popup => popup.key === popupName && !popup.closing
+      );
+      if (popup) {
+        return popup as ReturnPopupObject<string>;
+      }
     }
-    config(config: PopupConfig) {
-      this.configCache = config;
-      return this;
-    }
-  }
-
-  const popupStoreCache: Record<string, Store> = Object.create(null);
-
-  function usePopupStore(popupConfig: PopupConfig = {}) {
-    const key = JSON.stringify(popupConfig);
-    if (popupStoreCache[key]) {
-      return popupStoreCache[key];
+    // 創建窗口對象
+    const rawPopupObject = new PopupObject<string>(
+      popupId,
+      name,
+      mergeProps(cachedProps, popupData, query),
+      popupConfig,
+      this.close.bind(this),
+      popupName
+    );
+    const popupObject = reactive(
+      rawPopupObject as unknown as RuntimePopupObject
+    ) as unknown as ReturnPopupObject<string>;
+    /** 彈窗類型处理关闭事件 */
+    if (popupConfig.type === 'daily') {
+      const storeName = `${storageNamespace()}_${popupName}_daily_open_time`;
+      const prevDayTime = readStorage(storeName) || 0;
+      const curDayTime = new Date().setHours(0, 0, 0, 0);
+      popupObject.disabled = curDayTime <= Number(prevDayTime);
+      popupObject.on('close', (_, val) => {
+        if (val) {
+          writeStorage(storeName, null);
+        } else {
+          writeStorage(storeName, curDayTime.toString());
+        }
+        /** 沒有其它關閉事件才觸發 */
+        if (popupObject.event.close?.length === 1) {
+          this.close(popupObject.id);
+        }
+      });
+    } else if (popupConfig.type === 'once') {
+      const storeName = `${storageNamespace()}_${popupName}_once`;
+      const storeVal = readStorage(storeName);
+      popupObject.disabled = Boolean(Number(storeVal));
+      popupObject.on('close', (_, val) => {
+        if (val) {
+          writeStorage(storeName, null);
+        } else {
+          writeStorage(storeName, '1');
+        }
+        /** 沒有其它關閉事件才觸發 */
+        if (popupObject.event.close?.length === 1) {
+          this.close(popupObject.id);
+        }
+      });
     } else {
-      popupStoreCache[key] = new Store(popupConfig);
-      return popupStoreCache[key];
+      // 默認關閉窗口事件
+      popupObject.on('close', () => {
+        /** 沒有其它關閉事件才觸發 */
+        if (popupObject.event.close?.length === 1) {
+          this.close(popupObject.id);
+        }
+      });
     }
-  }
 
-  /**
-   * popupStore
-   * @params config store默認彈窗配置
-   */
-  return usePopupStore;
+    if (!popupObject.disabled) {
+      this.popupList.push(popupObject as unknown as RuntimePopupObject);
+      nextTick(() => {
+        if (!popupObject.closing) {
+          popupObject.show = true;
+        }
+      });
+    }
+    return popupObject;
+  }
+  open<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+  open<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  open(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(popupName, popupData, popupConfig);
+  }
+  only<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  only<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  only(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(
+      popupName,
+      popupData,
+      PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { only: true })
+    );
+  }
+  daily<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+  daily<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  daily(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(
+      popupName,
+      popupData,
+      PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { type: 'daily' })
+    );
+  }
+  once<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+  once<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  once(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(
+      popupName,
+      popupData,
+      PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { type: 'once' })
+    );
+  }
+  bottom<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
+  ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+  bottom<const Name extends string>(
+    popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
+    ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
+  ): ReturnPopupObject<Name, PopupReuseData<Name>>;
+  bottom(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+    return this.createPopupRuntime(
+      popupName,
+      popupData,
+      PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { anime: 'bottom' })
+    );
+  }
+  close(id = -1): RuntimePopupObject | null {
+    let popup: RuntimePopupObject | null = null;
+    // 沒有傳id關閉最後一個
+    if (id === -1) {
+      for (let i = this.popupList.length - 1; i >= 0; i--) {
+        const item = this.popupList[i];
+        if (item && !item.closing) {
+          popup = item;
+          break;
+        }
+      }
+    } else {
+      popup = this.popupList.find(item => item.id === id) || null;
+    }
+    if (popup && !popup.closing) {
+      const popupId = popup.id;
+      popup.closing = true;
+      popup.show = false;
+      nextTick(() => {
+        const index = this.popupList.findIndex(item => item.id === popupId);
+        if (index > -1) this.popupList.splice(index, 1);
+      });
+    }
+    return popup;
+  }
+  toast(text: string, config?: ToastConfig | number): ToastObject {
+    const toastId = this.popupIndex.value++;
+    const toastObject = new ToastObject(toastId, text, config, () => {
+      const index = this.toastList.findIndex(toastObj => toastObj.id === toastId);
+      if (index > -1) {
+        return this.toastList.splice(index, 1);
+      }
+      return false;
+    });
+    this.toastList.push(toastObject);
+    toastObject.start();
+    return toastObject;
+  }
+  props<Props extends object>(props: Props): Store<Props, true> {
+    if (this.caches.props) this.caches.props.active = false;
+    const token: PropsCache = { data: mergeProps(props), active: true };
+    this.caches.props = token;
+    return new Store<Props, true>(this.defaults, this.caches, token);
+  }
+  config(config: PopupConfig): this {
+    this.caches.config = config;
+    return this;
+  }
 }
 
-const usePopupStore = createPopupStore();
+const popupStoreCache: Record<string, Store> = Object.create(null);
+
+/** 按默认配置取得 store，共享模块级弹窗状态。 */
+function usePopupStore(popupConfig: PopupConfig = {}) {
+  const snapshot = PopupObject.deepMerge({}, popupConfig);
+  const key = JSON.stringify(snapshot);
+  if (popupStoreCache[key]) {
+    return popupStoreCache[key];
+  } else {
+    popupStoreCache[key] = new Store(snapshot);
+    return popupStoreCache[key];
+  }
+}
+
 export type PopupStore = ReturnType<typeof usePopupStore>;
 export default usePopupStore;

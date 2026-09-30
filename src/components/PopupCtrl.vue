@@ -7,6 +7,9 @@
         v-bind="popupItem.transitionConfig"
         v-for="popupItem in popupList"
         :key="popupItem.id"
+        @before-leave="trackMask(popupItem, $event)"
+        @after-leave="releaseMask(popupItem.id, $event)"
+        @leave-cancelled="trackMask(popupItem, $event)"
         @beforeEnter="
           animeEvent(
             $event,
@@ -26,6 +29,7 @@
       >
         <div
           class="popup_ctrl_mask"
+          :ref="el => trackMask(popupItem, el)"
           @click.stop.self="clickMask(popupItem)"
           :key="popupItem.id"
           :style="[
@@ -72,9 +76,11 @@
 <script lang="ts" setup>
 import {
   computed,
-  watch,
+  watchEffect,
   inject,
   ref,
+  shallowReactive,
+  nextTick,
   onMounted,
   onBeforeUnmount,
   normalizeStyle,
@@ -83,6 +89,7 @@ import {
 } from "vue";
 import type { PopupConfig, PopupStore } from "../store/popup.js";
 import { updateBodyEffects } from "./bodyEffects.js";
+import { toRgba } from "./maskColor.js";
 // import { ORIGIN } from 'UTIL/index'
 // import confetti from 'canvas-confetti'
 
@@ -120,42 +127,6 @@ const popupList = computed(() => {
 // toast列表
 const toastList = computed(() => popupStore.toastList);
 
-const toRgba = (color: string, opacity: number | string) => {
-  const hexColorReg = /^#([0-9a-fA-f]{3,8})$/;
-  const rgbColorReg =
-    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,?\s*([\.0-9]{1,3})?\s*\)$/;
-  if (hexColorReg.test(color)) {
-    const hexStr = color.slice(1);
-    const singlehex = hexStr.length === 3 || hexStr.length === 4;
-
-    const rgbList =
-      hexStr.match(singlehex ? /.{1}/g : /.{2}/g)?.map((item, i) => {
-        let hexItem = item;
-        if (singlehex) {
-          hexItem += item;
-        }
-        if (i === 3) {
-          return parseInt(hexItem, 16) / 255;
-        }
-        return parseInt(hexItem, 16);
-      }) || [];
-    opacity = isNaN(Number(opacity))
-      ? rgbList.join(",")[3] || opacity
-      : opacity;
-    return `rgba(${rgbList.slice(0, 3).join(",")},${opacity})`;
-  } else if (rgbColorReg.test(color)) {
-    const rgba = color.replace(rgbColorReg, (_, r, g, b, a) => {
-      if (a) {
-        return `rgba(${r},${g},${b},${isNaN(Number(opacity)) ? a : opacity})`;
-      }
-      return `rgba(${r},${g},${b},${opacity})`;
-    });
-    return rgba;
-  } else {
-    return color;
-  }
-};
-
 const defaultMaskColor = computed(() => {
   const enter = toRgba($props.maskColor, $props.opacity);
   let leave = toRgba($props.maskColor, 0);
@@ -192,17 +163,78 @@ const setMaskColor = (
 };
 
 const bodyOwner = Symbol("PopupCtrl");
+type PopupItem = PopupStore["popupList"][number];
+type MaskEntry = { popup: PopupItem; element: HTMLElement };
+const renderedMasks = shallowReactive(new Map<number, MaskEntry>());
+let disposed = false;
+
+const trackMask = (popup: PopupItem, element: unknown) => {
+  if (disposed) return;
+  if (element) {
+    renderedMasks.set(popup.id, { popup, element: element as HTMLElement });
+  } else {
+    const previous = renderedMasks.get(popup.id)?.element;
+    // ref 会先于退场结束清空；只清理已真正离开页面的遮罩。
+    nextTick(() => {
+      if (
+        previous &&
+        renderedMasks.get(popup.id)?.element === previous &&
+        !previous.isConnected
+      ) {
+        renderedMasks.delete(popup.id);
+      }
+    });
+  }
+};
+
+const releaseMask = (id: number, element: unknown) => {
+  if (renderedMasks.get(id)?.element === element) renderedMasks.delete(id);
+};
+
+const maskLayer = ({ popup, element }: MaskEntry) => {
+  const normalized = normalizeStyle(popup.option.maskStyle);
+  const style = normalized && typeof normalized === "object" ? normalized : {};
+  const fallback =
+    style["z-index"] ?? style.zIndex ?? popup.option.zIndex ?? 99999 + popup.id;
+  const computed =
+    element.ownerDocument?.defaultView?.getComputedStyle(element).zIndex;
+  const value = Number(
+    String(computed || fallback).replace(/\s*!important\s*$/i, "").trim(),
+  );
+  return Number.isFinite(value) ? value : 0;
+};
+
 let stopBodyWatch: (() => void) | undefined;
 onMounted(() => {
   mounted.value = true;
-  stopBodyWatch = watch(
-    [() => popupList.value.length, () => $props.bgBlur],
-    ([count, blur]) => updateBodyEffects(bodyOwner, count > 0, blur),
-    { immediate: true, flush: "post" },
+  stopBodyWatch = watchEffect(
+    () => {
+      const masks = [...renderedMasks.values()];
+      let top: MaskEntry | undefined;
+      let topLayer = Number.NEGATIVE_INFINITY;
+      for (const mask of masks) {
+        const layer = maskLayer(mask);
+        const later =
+          !top ||
+          ((top.element.compareDocumentPosition?.(mask.element) ?? 4) & 4) !== 0;
+        if (layer > topLayer || (layer === topLayer && later)) {
+          top = mask;
+          topLayer = layer;
+        }
+      }
+      // 退场节点不再由模板更新，也需要同步其顶层标记。
+      for (const mask of masks) {
+        mask.element.classList.toggle("popup_ctrl_mask_top", mask === top);
+      }
+      updateBodyEffects(bodyOwner, masks.length > 0, $props.bgBlur);
+    },
+    { flush: "post" },
   );
 });
 onBeforeUnmount(() => {
+  disposed = true;
   stopBodyWatch?.();
+  renderedMasks.clear();
   updateBodyEffects(bodyOwner, false, false);
 });
 
@@ -247,45 +279,23 @@ const clickMask = (popupItem: any) => {
     canClose = true;
   }
   if (canClose) {
-    popupItem.close();
+    return popupItem.close();
   }
 };
 </script>
 <style lang="scss">
 
-// 背景模糊
-
-/* 支持 backdrop-filter */
-// @supports (backdrop-filter: blur(5px)) or (-webkit-backdrop-filter: blur(5px)) {
-//   body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
-//     backdrop-filter: blur(5px);
-//   }
-// }
-
-/* 完全不支持 backdrop-filter */
-@supports not (
-  (backdrop-filter: blur(5px)) or (-webkit-backdrop-filter: blur(5px))
-) {}
-  body.filter-blur > :not(.popup_ctrl):not(.dis_popup_blur),
-  body.filter-blur > .popup_ctrl > :not(.popup_ctrl_toast) {
-    filter: blur(5px);
-  }
-  body.filter-blur > .popup_ctrl > .popup_ctrl_mask:last-of-type {
-    filter: none;
-  }
-
+// 背景及非顶层遮罩模糊，toast 保持清晰。
+body.filter-blur > :not(.popup_ctrl):not(.dis_popup_blur),
+body.filter-blur > .popup_ctrl > .popup_ctrl_mask:not(.popup_ctrl_mask_top) {
+  filter: blur(5px);
+}
 
 .popup_ctrl {
-  z-index: 9999;
-  width: 100vw;
-  height: 100vh;
-  position: fixed;
-  top: 0;
-  left: 0;
   pointer-events: none;
   .popup_ctrl_mask {
     z-index: 1;
-    position: absolute;
+    position: fixed;
     pointer-events: auto;
     top: 0;
     left: 0;

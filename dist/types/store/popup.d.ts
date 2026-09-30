@@ -1,5 +1,5 @@
 import type { StyleValue, TransitionProps } from 'vue';
-import type { DefineEmits, DefineProps, PopupInstance, PopupCompsKey } from './popup.types.js';
+import type { DefineEmits, DefineProps, PopupInstance, ComponentName, PopupData, PopupCacheCheck, PopupOpenArgs, PopupInput, PopupCreateData, PopupReuseData } from './popup.types.js';
 /**
  * 彈窗配置
  */
@@ -56,16 +56,6 @@ export interface PopupConfig {
 /** 所有彈窗組件 */
 /** 所有彈窗组件名稱 */
 /** 获取vue组件参数 */
-/** 解析字符串参数 */
-type SplitParams<Str extends string> = Str extends `${infer Name}?${infer Params}` ? [Name, FormatParams<Params>] : [Str, any];
-type FormatParams<Str extends string> = Str extends `${infer Param1}&${infer Param2}` ? ForamtValue<Param1> & FormatParams<Param2> : ForamtValue<Str>;
-type ForamtValue<Str extends string> = Str extends `${infer Name}=${infer Value}` ? {
-    [T in Name]: Value;
-} : {
-    [T in Str]: true;
-};
-/** 获取组件名字 */
-type FormatName<Name extends string> = SplitParams<Name>[0];
 /** 获取参数 */
 type GetObjectParams<T, K, D = never> = K extends keyof T ? Pick<T, K>[K] : D;
 type GetFunctionParams<T, K = never, D = never> = T extends (...args: any[]) => any ? K extends number ? Parameters<T>[K] : Parameters<T> : D;
@@ -76,24 +66,27 @@ type DefaultEmitEvent = {
 };
 /** 获取组件emit */
 /** 對外統一返回的響應式彈窗句柄 */
-type ReturnPopupObject<Name extends string = string> = Omit<PopupObject<Name>, 'show' | 'ref'> & {
+type ReturnPopupObject<Name extends string = string, Data = PopupData<Name>> = Omit<PopupObject<Name, Data>, 'show' | 'ref'> & {
     show: boolean;
     ref: PopupInstance<Name> | undefined;
 };
-declare function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>>(target: T | undefined, source: T1): T & T1;
+declare function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>>(target: T | undefined, source: T1, copies?: WeakMap<object, any>): T & T1;
+type ReadonlyConfig<T, Depth extends unknown[] = []> = Depth['length'] extends 5 ? T : T extends object ? {
+    readonly [K in keyof T]: ReadonlyConfig<T[K], [...Depth, unknown]>;
+} : T;
 /** 创建弹窗对象 */
-declare class PopupObject<Name extends string> {
+declare class PopupObject<Name extends string, Data = PopupData<Name>> {
     /** 簡單合併兩個對象 */
     static deepMerge: typeof deepMerge;
     show: import("vue").Ref<boolean, boolean>;
     /** 彈窗id */
     id: number;
     /** 弹窗名称 */
-    name: Name;
+    name: ComponentName<Name>;
     /** 完整名称，用于区分 query 不同的弹窗。 */
     key: string;
     /** 弹窗数据 */
-    data: DefineProps<Name>;
+    data: Data;
     /** 彈窗組件 */
     ref: import("vue").Ref<PopupInstance<Name> | undefined, PopupInstance<Name> | undefined>;
     /** disabled */
@@ -103,7 +96,7 @@ declare class PopupObject<Name extends string> {
     transitionConfig: TransitionProps;
     /** 配置 */
     option: PopupConfig;
-    /** close 回调中再次调用句柄 close() 时直接关闭，避免递归。 */
+    /** 同步 close 回调中再次调用句柄 close() 时直接关闭，避免递归。 */
     private closeEventDepth;
     /** 窗口控制方法掛載 */
     private closeCtrlFn;
@@ -118,7 +111,7 @@ declare class PopupObject<Name extends string> {
      * @param option 彈窗配置
      * @param closeCtrlFn 關閉控制方法
      */
-    constructor(id: number, name: Name, props: DefineProps<Name>, option: PopupConfig, closeCtrlFn: (...args: any[]) => any, key?: string);
+    constructor(id: number, name: ComponentName<Name>, props: Data, option: PopupConfig, closeCtrlFn: (...args: any[]) => any, key?: string);
     /** 初始化彈窗動畫參數 */
     initTransitionConfig(): void;
     private addListener;
@@ -127,21 +120,21 @@ declare class PopupObject<Name extends string> {
      * @param event 事件名
      * @returns { Promise } 彈窗對象
      */
-    on<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType): Promise<GetFunctionParams<GetObjectParams<DefaultEmitEvent, EventType, GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => any>>, 0>>;
+    on<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType): Promise<GetFunctionParams<GetObjectParams<DefaultEmitEvent, EventType, GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => any>>, 0> | undefined>;
     /**
      * 註冊監聽$emit事件, 觸發在組件上使用$emit('事件名')觸發事件
      * @param event 事件名
      * @param callback 事件回調
      * @returns { PopupObject } 彈窗對象
      */
-    on<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType, callback: GetObjectParams<DefaultEmitEvent, EventType, GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => void>>): ReturnPopupObject<Name>;
+    on<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType, callback: GetObjectParams<DefaultEmitEvent, EventType, GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => void>>): ReturnPopupObject<Name, Data>;
     /**
      * 解綁監聽$emit事件
      * @param event 事件名
      * @param callback 註冊事件時使用的函數
      * @returns { PopupObject } 彈窗對象
      */
-    un<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType, func: any): ReturnPopupObject<Name>;
+    un<EventType extends string>(event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType, func: any): ReturnPopupObject<Name, Data>;
     /**
      * 獲取組件實例
      * @param el 組件
@@ -149,17 +142,17 @@ declare class PopupObject<Name extends string> {
      */
     onRef: (el: any) => void;
     /** 手動關閉窗口 */
-    close: (...args: any[]) => void;
+    close: (...args: any[]) => void | Promise<void>;
     /**
      * 傳組件數據
      * @param {DefineProps<Name>} props 組件數據
      */
-    props(props: DefineProps<Name>): ReturnPopupObject<Name>;
+    props(props: DefineProps<Name>): ReturnPopupObject<Name, DefineProps<Name>>;
     /**
      * 設置彈窗配置
      * @param {PopupConfig} config 彈窗配置
      */
-    config(config: PopupConfig): ReturnPopupObject<Name>;
+    config(config: PopupConfig): ReturnPopupObject<Name, Data>;
 }
 /** 列表渲染與關閉流程所需的寬化運行時句柄，避免展開所有彈窗組件類型 */
 type RuntimePopupObject = {
@@ -175,7 +168,7 @@ type RuntimePopupObject = {
     option: PopupConfig;
     event: Record<string, ((...args: any[]) => any)[]>;
     onRef: (el: any) => any;
-    close: (...args: any[]) => void;
+    close: (...args: any[]) => void | Promise<void>;
 };
 export type ToastConfig = {
     /** 持續時間 */
@@ -197,25 +190,45 @@ declare class ToastObject {
     /** 开始计时 */
     start(): void;
 }
-declare const usePopupStore: (popupConfig?: PopupConfig) => {
-    popupConfig: {};
+type PropsCache = {
+    data: Record<string, unknown>;
+    active: boolean;
+};
+type StoreCaches = {
+    props?: PropsCache;
+    config?: PopupConfig;
+};
+type PopupSingleConfig = Omit<PopupConfig, 'only'> & {
+    only?: false;
+};
+declare class Store<Cache extends object = {}, Scoped extends boolean = false> {
+    private readonly defaults;
+    private readonly caches;
+    private readonly propsToken?;
+    get popupConfig(): ReadonlyConfig<PopupConfig>;
     popupIndex: import("vue").Ref<number, number>;
     popupList: RuntimePopupObject[];
     toastList: ToastObject[];
-    /** 緩存數據 */
-    dataCache: any;
-    /** 緩存配置 */
-    configCache: any;
-    createPopup<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
-    open<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
-    only<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
-    daily<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
-    once<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
-    bottom<Name extends string>(popupName: Name | PopupCompsKey, popupData?: DefineProps<Name>, popupConfig?: PopupConfig): ReturnPopupObject<FormatName<Name>>;
+    constructor(popupConfig: PopupConfig, caches?: StoreCaches, propsToken?: PropsCache);
+    createPopup<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+    createPopup<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    private createPopupRuntime;
+    open<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+    open<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    only<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    only<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    daily<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+    daily<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    once<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+    once<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
+    bottom<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
+    bottom<const Name extends string>(popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>, ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>): ReturnPopupObject<Name, PopupReuseData<Name>>;
     close(id?: number): RuntimePopupObject | null;
     toast(text: string, config?: ToastConfig | number): ToastObject;
-    props<Name extends string>(props: DefineProps<Name>): /*elided*/ any;
-    config(config: PopupConfig): /*elided*/ any;
-};
+    props<Props extends object>(props: Props): Store<Props, true>;
+    config(config: PopupConfig): this;
+}
+/** 按默认配置取得 store，共享模块级弹窗状态。 */
+declare function usePopupStore(popupConfig?: PopupConfig): Store<{}, false>;
 export type PopupStore = ReturnType<typeof usePopupStore>;
 export default usePopupStore;

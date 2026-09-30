@@ -43,7 +43,6 @@
   "peerDependencies": {
     "vue": "^3.5.0"
   },
-  "packageManager": "pnpm@11.1.2^",
   "exports": {
     ".": {
       "node": {
