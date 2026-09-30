@@ -133,7 +133,7 @@ popup.on('confirm', handleConfirm)
 popup.un('confirm', handleConfirm)
 ```
 
-不传回调时返回 Promise，成功值为事件的第一个参数。事件触发前收到关闭请求时，Promise 会拒绝，拒绝值为关闭函数，需要处理取消分支：
+不传回调时返回 Promise，成功值为事件的第一个参数。Promise 完成或取消后会移除对应的内部监听，不会绕过其他 `close` 回调的拦截。事件触发前收到关闭请求时，Promise 会拒绝，拒绝值为关闭函数，需要处理取消分支：
 
 ```ts
 const popup = store.open('PopupConfirm', { id: 1 })
@@ -147,11 +147,13 @@ try {
 }
 ```
 
-`popup.on('close')` 的成功值也是关闭函数，调用它才会关闭。`store.close()` 绕过所有事件，因此不会完成等待事件的 Promise；需要取消处理时使用 `popup.close()`。
+`popup.on('close')` 的成功值也是关闭函数，本次关闭请求不会自动关闭弹窗，可调用该函数确认关闭。Promise 完成后，后续关闭请求由剩余的 `close` 回调或默认关闭规则处理。`store.close()` 绕过所有事件，因此不会完成等待事件的 Promise；需要取消处理时使用 `popup.close()`。
 
 ## 配置与方法
 
 单次配置可作为第三个参数传入，或通过句柄修改；`store.config()` 与 `store.props()` 只对下一次创建生效。
+
+创建弹窗时，props 按缓存数据、本次传入数据、名称 query 的顺序进行顶层合并，后者覆盖前者，`undefined` 不覆盖已有值。同名对象属性会整项替换，不进行深合并；嵌套对象、数组、响应式对象和 ref 保留原引用，支持循环引用。`popup.props(data)` 替换 props 时也会保留嵌套引用。
 
 ```ts
 store.open('PopupConfirm', { id: 1 }, { opacity: 0, maskClose: false })

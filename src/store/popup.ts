@@ -1,4 +1,4 @@
-import { reactive, ref, nextTick } from 'vue';
+import { reactive, shallowReactive, ref, nextTick } from 'vue';
 import type {
   // ComputedOptions,
   // MethodOptions,
@@ -197,6 +197,20 @@ function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>
   return result;
 }
 
+/** props 仅合并顶层，保留嵌套数据的引用及其响应式行为。 */
+function mergeProps(...sources: (Record<string, any> | null | undefined)[]): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const source of sources) {
+    if (!source) continue;
+    for (const key of Object.keys(source)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      const value = source[key];
+      if (value !== undefined) result[key] = value;
+    }
+  }
+  return shallowReactive(result);
+}
+
 // 类型守卫函数
 function isObject(value: any): value is Record<string, any> {
   if (value === null || typeof value !== 'object') return false;
@@ -270,7 +284,7 @@ class PopupObject<Name extends string> {
     this.name = name;
     this.key = key;
     this.option = PopupObject.deepMerge(this.option, option || {});
-    this.data = props; // 弹窗数据
+    this.data = props; // 已浅合并的弹窗数据
     this.initTransitionConfig();
     this.closeCtrlFn = closeCtrlFn;
   }
@@ -304,6 +318,11 @@ class PopupObject<Name extends string> {
     } : listener;
     (this.event[event] ??= []).push(handler);
     (this.listeners[event] ??= []).push({ source, handler });
+    return () => {
+      // Vue 派发时遍历原数组；替换数组避免清理时跳过其它监听。
+      this.event[event] = (this.event[event] || []).filter(item => item !== handler);
+      this.listeners[event] = (this.listeners[event] || []).filter(record => record.handler !== handler);
+    };
   }
   /**
    * 註冊監聽$emit事件, 返回promise,主要方便用于try catch的方式使用
@@ -348,28 +367,28 @@ class PopupObject<Name extends string> {
     // 沒有傳入回調返回promise
     if (typeof callback !== 'function') {
       return new Promise((resolve, reject) => {
+        let settled = false;
+        const removeListeners: (() => void)[] = [];
+        const close = this.closeCtrlFn.bind(this, this.id);
+        const finish = (settle: () => void) => {
+          if (settled) return;
+          settled = true;
+          removeListeners.forEach(remove => remove());
+          settle();
+        };
         if (event === 'close') {
-          this.addListener(eventName, () => {
-            resolve(this.closeCtrlFn.bind(this, this.id));
-          });
+          removeListeners.push(this.addListener(eventName, () => {
+            finish(() => resolve(close));
+          }));
+        } else if (this.disabled) {
+          finish(() => resolve(undefined));
         } else {
-          let fulfilled = false;
-          this.addListener('close', () => {
-            if (fulfilled) {
-              this.closeCtrlFn.call(this, this.id);
-            } else {
-              fulfilled = true;
-              reject(this.closeCtrlFn.bind(this, this.id));
-            }
-          });
-          this.addListener(eventName, (...args) => {
-            fulfilled = true;
-            resolve(args[0]);
-          });
-          if (this.disabled) {
-            fulfilled = true;
-            resolve(undefined);
-          }
+          removeListeners.push(this.addListener('close', () => {
+            finish(() => reject(close));
+          }));
+          removeListeners.push(this.addListener(eventName, (...args) => {
+            finish(() => resolve(args[0]));
+          }));
         }
       });
     }
@@ -430,7 +449,7 @@ class PopupObject<Name extends string> {
    * @param {DefineProps<Name>} props 組件數據
    */
   props(props: DefineProps<Name>): ReturnPopupObject<Name> {
-    this.data = props; // 弹窗数据
+    this.data = shallowReactive(props);
     return this as unknown as ReturnPopupObject<Name>;
   }
   /**
@@ -537,10 +556,8 @@ function createPopupStore() {
         configClone = PopupObject.deepMerge(configClone, this.configCache);
         this.configCache = null;
       }
-      if (this.dataCache) {
-        popupData = PopupObject.deepMerge(this.dataCache, popupData || {});
-        this.dataCache = null;
-      }
+      const cachedProps = this.dataCache;
+      this.dataCache = null;
       popupConfig = PopupObject.deepMerge(configClone, popupConfig);
       // if (!popupName) return '';
       const popupId = this.popupIndex.value++;
@@ -568,7 +585,7 @@ function createPopupStore() {
       const rawPopupObject = new PopupObject(
         popupId,
         name as FormatName<Name>,
-        PopupObject.deepMerge(PopupObject.deepMerge({}, popupData || {}), query) as DefineProps<FormatName<Name>>,
+        mergeProps(cachedProps, popupData, query) as DefineProps<FormatName<Name>>,
         popupConfig,
         this.close.bind(this),
         popupName
