@@ -1,6 +1,6 @@
 import type { ComponentPublicInstance, GlobalComponents, PublicProps } from 'vue';
 type CapitalizedKeys<T, Prefix extends string> = {
-    [K in keyof T]: K extends `${Prefix}${infer S}` ? S extends Capitalize<S> ? K : never : never;
+    [K in keyof T]: K extends `${Prefix}${infer S}` ? (S extends Capitalize<S> ? K : never) : never;
 }[keyof T];
 type Prettify<T> = {
     [K in keyof T]: T[K];
@@ -15,7 +15,10 @@ type QueryEntry<Entry extends string> = Entry extends `${infer Key}=${infer Valu
 type ParseQuery<Query extends string> = Query extends `${infer Head}&${infer Tail}` ? MergeProps<QueryEntry<Head>, ParseQuery<Tail>> : QueryEntry<Query>;
 type QueryText<Query extends string> = Query extends `${infer First}?${string}` ? First : Query;
 type IsDynamicQueryPart<Part extends string> = string extends Part ? true : Part extends `${infer Value extends number}` ? number extends Value ? true : false : Part extends `${infer Value extends bigint}` ? bigint extends Value ? true : false : false;
-type IsQueryLiteral<Query extends string, Depth extends unknown[] = [], Segments extends unknown[] = []> = string extends Query ? false : Query extends '' ? true : Depth['length'] extends 128 ? false : Segments['length'] extends 20 ? false : Query extends `${infer Head}${infer Tail}` ? IsDynamicQueryPart<Head> extends true ? false : IsQueryLiteral<Tail, [...Depth, unknown], Head extends '&' ? [...Segments, unknown] : Segments> : false;
+type IsQueryLiteral<Query extends string, Depth extends unknown[] = [], Segments extends unknown[] = []> = string extends Query ? false : Query extends '' ? true : Depth['length'] extends 128 ? false : Segments['length'] extends 20 ? false : Query extends `${infer Head}${infer Tail}` ? IsDynamicQueryPart<Head> extends true ? false : IsQueryLiteral<Tail, [
+    ...Depth,
+    unknown
+], Head extends '&' ? [...Segments, unknown] : Segments> : false;
 type QueryData<Props, Query extends string> = IsQueryLiteral<Query> extends true ? MergeProps<Props, ParseQuery<Query>> : Prettify<{
     [K in keyof Props]: Props[K] | string | true;
 }> & Record<string, unknown>;

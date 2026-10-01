@@ -1,4 +1,4 @@
-import type { PopupConfig } from "../store/popup.js";
+import type { PopupConfig } from '../store/popup.js';
 interface PopupCtrlProps {
     /** 點擊遮罩關閉 */
     maskClose?: boolean;

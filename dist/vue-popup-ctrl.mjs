@@ -331,8 +331,8 @@ var Y = (e, t) => {
 	},
 	setup(u) {
 		E((e) => ({
-			bdae577c: P.value.enter,
-			bcf1c7be: P.value.leave
+			v35902d54: P.value.enter,
+			v34d39d96: P.value.leave
 		}));
 		let y = u, A = d("popupStore");
 		if (!A) throw Error("[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。");
