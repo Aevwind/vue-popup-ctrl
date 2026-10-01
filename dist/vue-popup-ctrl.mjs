@@ -321,23 +321,18 @@ var Y = (e, t) => {
 			type: Boolean,
 			default: !1
 		},
-		maskColor: {
-			type: String,
-			default: "#000000"
-		},
+		maskColor: { default: "#000000" },
 		bgBlur: {
 			type: Boolean,
 			default: !1
 		},
-		opacity: {
-			type: Number,
-			default: .8
-		}
+		opacity: { default: .8 },
+		popupConfig: {}
 	},
 	setup(u) {
 		E((e) => ({
-			f19944ae: P.value.enter,
-			f0dcb4f0: P.value.leave
+			bdae577c: P.value.enter,
+			bcf1c7be: P.value.leave
 		}));
 		let y = u, A = d("popupStore");
 		if (!A) throw Error("[vue-popup-ctrl] 请先使用 app.use(PopupCtrl) 安装插件。");

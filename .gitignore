@@ -1,1 +1,5 @@
-node_modules
+node_modules/
+vue-popup-ctrl-*.tgz
+*.log
+coverage/
+*.tsbuildinfo

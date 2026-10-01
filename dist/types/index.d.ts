@@ -1,12 +1,6 @@
-import type { App, DefineComponent } from 'vue';
+import type { App } from 'vue';
 import usePopupStore, { type PopupConfig, type PopupStore } from './store/popup.js';
-export interface PopupCtrlProps {
-    maskClose?: boolean;
-    maskColor?: string;
-    bgBlur?: boolean;
-    opacity?: number;
-}
-declare const PopupCtrl: DefineComponent<PopupCtrlProps>;
+import PopupCtrl from './components/PopupCtrl.vue.js';
 declare module 'vue' {
     /** 彈窗組件 */
     function inject(key: 'popupStore'): PopupStore | undefined;

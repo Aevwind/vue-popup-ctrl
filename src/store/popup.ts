@@ -172,15 +172,22 @@ function deepMerge<T extends Record<string, any>, T1 extends Record<string, any>
   if (isObject(source)) copies.set(source, result);
 
   for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)
-      && key !== '__proto__' && key !== 'constructor' && key !== 'prototype') {
+    if (
+      Object.prototype.hasOwnProperty.call(source, key) &&
+      key !== '__proto__' &&
+      key !== 'constructor' &&
+      key !== 'prototype'
+    ) {
       const sourceValue = source[key];
       if (sourceValue === undefined) continue;
-      const targetValue = Object.prototype.hasOwnProperty.call(result, key) ? result[key] : undefined;
+      const targetValue = Object.prototype.hasOwnProperty.call(result, key)
+        ? result[key]
+        : undefined;
 
       if (isObject(sourceValue)) {
-        result[key] = copies.get(sourceValue)
-          || deepMerge(isObject(targetValue) ? targetValue : {}, sourceValue, copies);
+        result[key] =
+          copies.get(sourceValue) ||
+          deepMerge(isObject(targetValue) ? targetValue : {}, sourceValue, copies);
       } else if (Array.isArray(sourceValue)) {
         result[key] = copyConfigArray(sourceValue, copies);
       } else {
@@ -201,7 +208,9 @@ function copyConfigArray(source: any[], copies: WeakMap<object, any>): any[] {
   source.forEach((value, index) => {
     result[index] = Array.isArray(value)
       ? copyConfigArray(value, copies)
-      : isObject(value) ? copies.get(value) || deepMerge({}, value, copies) : value;
+      : isObject(value)
+        ? copies.get(value) || deepMerge({}, value, copies)
+        : value;
   });
   return result;
 }
@@ -215,8 +224,11 @@ function freezeConfig<T>(value: T, visited = new WeakSet<object>()): T {
   return value;
 }
 
-type ReadonlyConfig<T, Depth extends unknown[] = []> = Depth['length'] extends 5 ? T
-  : T extends object ? { readonly [K in keyof T]: ReadonlyConfig<T[K], [...Depth, unknown]> } : T;
+type ReadonlyConfig<T, Depth extends unknown[] = []> = Depth['length'] extends 5
+  ? T
+  : T extends object
+    ? { readonly [K in keyof T]: ReadonlyConfig<T[K], [...Depth, unknown]> }
+    : T;
 
 /** props 仅合并顶层，保留嵌套数据的引用及其响应式行为。 */
 function mergeProps(...sources: (Record<string, any> | null | undefined)[]): Record<string, any> {
@@ -284,7 +296,10 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
   private closeCtrlFn = (..._: any[]) => undefined;
   /** 事件列表 **/
   event: Record<string, ((...args: any[]) => any)[]> = Object.create(null);
-  private listeners: Record<string, { active: boolean; source?: (...args: any[]) => any; handler: (...args: any[]) => any }[]> = Object.create(null);
+  private listeners: Record<
+    string,
+    { active: boolean; source?: (...args: any[]) => any; handler: (...args: any[]) => any }[]
+  > = Object.create(null);
   /**
    *
    * @param id 彈窗id
@@ -328,7 +343,11 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
       duration
     };
   }
-  private addListener(event: string, listener: (...args: any[]) => any, source?: (...args: any[]) => any) {
+  private addListener(
+    event: string,
+    listener: (...args: any[]) => any,
+    source?: (...args: any[]) => any
+  ) {
     const record = { active: true, source, handler: (..._: any[]): any => undefined };
     const handler = (...args: any[]) => {
       if (!record.active) return;
@@ -349,7 +368,9 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
       // Vue 派发时遍历原数组；替换数组避免清理时跳过其它监听。
       record.active = false;
       this.event[event] = (this.event[event] || []).filter(item => item !== handler);
-      this.listeners[event] = (this.listeners[event] || []).filter(record => record.handler !== handler);
+      this.listeners[event] = (this.listeners[event] || []).filter(
+        record => record.handler !== handler
+      );
     };
   }
   /**
@@ -360,14 +381,15 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
   on<EventType extends string>(
     event: keyof DefaultEmitEvent | keyof DefineEmits<Name> | EventType
   ): Promise<
-    GetFunctionParams<
-      GetObjectParams<
-        DefaultEmitEvent,
-        EventType,
-        GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => any>
-      >,
-      0
-    > | undefined
+    | GetFunctionParams<
+        GetObjectParams<
+          DefaultEmitEvent,
+          EventType,
+          GetObjectParams<DefineEmits<Name>, EventType, (...args: any[]) => any>
+        >,
+        0
+      >
+    | undefined
   >;
   /**
    * 註冊監聽$emit事件, 觸發在組件上使用$emit('事件名')觸發事件
@@ -407,27 +429,41 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
         if (this.disabled) {
           finish(() => resolve(undefined));
         } else if (event === 'close') {
-          removeListeners.push(this.addListener(eventName, () => {
-            finish(() => resolve(close));
-          }));
+          removeListeners.push(
+            this.addListener(eventName, () => {
+              finish(() => resolve(close));
+            })
+          );
         } else {
-          removeListeners.push(this.addListener('close', () => {
-            finish(() => reject(close));
-          }));
-          removeListeners.push(this.addListener(eventName, (...args) => {
-            finish(() => resolve(args[0]));
-          }));
+          removeListeners.push(
+            this.addListener('close', () => {
+              finish(() => reject(close));
+            })
+          );
+          removeListeners.push(
+            this.addListener(eventName, (...args) => {
+              finish(() => resolve(args[0]));
+            })
+          );
         }
       });
     }
     if (event === 'close') {
       // 將窗口關閉方法作為參數傳入
-      this.addListener(eventName, (...args: any[]) => {
-        return (callback as any).call(this, this.closeCtrlFn.bind(this, this.id), ...args);
-      }, callback as (...args: any[]) => any);
+      this.addListener(
+        eventName,
+        (...args: any[]) => {
+          return (callback as any).call(this, this.closeCtrlFn.bind(this, this.id), ...args);
+        },
+        callback as (...args: any[]) => any
+      );
     } else {
       if (!this.disabled) {
-        this.addListener(eventName, callback as (...args: any[]) => any, callback as (...args: any[]) => any);
+        this.addListener(
+          eventName,
+          callback as (...args: any[]) => any,
+          callback as (...args: any[]) => any
+        );
       }
     }
     return this as unknown as ReturnPopupObject<Name, Data>;
@@ -449,7 +485,9 @@ class PopupObject<Name extends string, Data = PopupData<Name>> {
       const record = records[index];
       record.active = false;
       this.listeners[event as string] = records.filter(item => item !== record);
-      this.event[event as string] = (this.event[event as string] || []).filter(item => item !== record.handler);
+      this.event[event as string] = (this.event[event as string] || []).filter(
+        item => item !== record.handler
+      );
     }
     return this as unknown as ReturnPopupObject<Name, Data>;
   }
@@ -580,7 +618,9 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
   private readonly defaults: PopupConfig;
   private readonly caches: StoreCaches;
   private readonly propsToken?: PropsCache;
-  get popupConfig(): ReadonlyConfig<PopupConfig> { return this.defaults; }
+  get popupConfig(): ReadonlyConfig<PopupConfig> {
+    return this.defaults;
+  }
   popupIndex = popupIndex;
   popupList = popupList;
   toastList = toastList;
@@ -589,7 +629,11 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     this.caches = caches;
     this.propsToken = propsToken;
   }
-  createPopup<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  createPopup<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
@@ -597,7 +641,11 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  createPopup(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  createPopup(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(popupName, popupData, popupConfig);
   }
   private createPopupRuntime(
@@ -632,9 +680,7 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     }
     // 配置了只能存在一個同名彈窗
     if (popupConfig?.only) {
-      const [popup] = this.popupList.filter(
-        popup => popup.key === popupName && !popup.closing
-      );
+      const [popup] = this.popupList.filter(popup => popup.key === popupName && !popup.closing);
       if (popup) {
         return popup as ReturnPopupObject<string>;
       }
@@ -703,7 +749,11 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     }
     return popupObject;
   }
-  open<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  open<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
@@ -711,10 +761,18 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  open(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  open(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(popupName, popupData, popupConfig);
   }
-  only<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  only<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
@@ -722,14 +780,22 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  only(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  only(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(
       popupName,
       popupData,
       PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { only: true })
     );
   }
-  daily<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  daily<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
@@ -737,14 +803,22 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  daily(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  daily(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(
       popupName,
       popupData,
       PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { type: 'daily' })
     );
   }
-  once<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  once<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
@@ -752,14 +826,22 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  once(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  once(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(
       popupName,
       popupData,
       PopupObject.deepMerge(PopupObject.deepMerge({}, popupConfig), { type: 'once' })
     );
   }
-  bottom<const Name extends string, Input extends object | undefined = undefined, const Config extends PopupConfig = PopupSingleConfig>(
+  bottom<
+    const Name extends string,
+    Input extends object | undefined = undefined,
+    const Config extends PopupConfig = PopupSingleConfig
+  >(
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, NoInfer<Input>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, Input, Config>
   ): ReturnPopupObject<Name, PopupCreateData<Name, Input, Scoped, Config>>;
@@ -767,7 +849,11 @@ class Store<Cache extends object = {}, Scoped extends boolean = false> {
     popupName: Name & PopupCacheCheck<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>>,
     ...args: PopupOpenArgs<NoInfer<Name>, Cache, PopupInput<NoInfer<Name>, Cache>, PopupConfig>
   ): ReturnPopupObject<Name, PopupReuseData<Name>>;
-  bottom(popupName: string, popupData?: Record<string, any>, popupConfig: PopupConfig = {}): ReturnPopupObject<string> {
+  bottom(
+    popupName: string,
+    popupData?: Record<string, any>,
+    popupConfig: PopupConfig = {}
+  ): ReturnPopupObject<string> {
     return this.createPopupRuntime(
       popupName,
       popupData,

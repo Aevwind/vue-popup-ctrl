@@ -7,7 +7,10 @@ function storage(kind: 'localStorage' | 'sessionStorage'): Storage | undefined {
   }
 }
 
-export function readStorage(key: string, kind: 'localStorage' | 'sessionStorage' = 'localStorage'): string | null {
+export function readStorage(
+  key: string,
+  kind: 'localStorage' | 'sessionStorage' = 'localStorage'
+): string | null {
   try {
     return storage(kind)?.getItem(key) ?? null;
   } catch {
@@ -26,6 +29,8 @@ export function writeStorage(key: string, value: string | null): void {
 }
 
 export function storageNamespace(): string {
-  return readStorage('RELEASE', 'sessionStorage')
-    || (typeof window === 'undefined' ? 'vue-popup-ctrl' : window.location.origin);
+  return (
+    readStorage('RELEASE', 'sessionStorage') ||
+    (typeof window === 'undefined' ? 'vue-popup-ctrl' : window.location.origin)
+  );
 }

@@ -1,0 +1,59 @@
+{
+  "singleQuote": true,
+  "tabWidth": 2,
+  "useTabs": false,
+  "trailingComma": "none",
+  "bracketSpacing": true,
+  "arrowParens": "avoid",
+  "printWidth": 100,
+  "endOfLine": "lf",
+  "quoteProps": "consistent",
+  "bracketSameLine": false,
+  "htmlWhitespaceSensitivity": "css",
+  "objectWrap": "preserve",
+  "overrides": [
+    {
+      "files": "*.{js,ts,vue}",
+      "options": {
+        "parser": "typescript"
+      }
+    },
+    {
+      "files": "*.vue",
+      "options": {
+        "parser": "vue",
+        "vueIndentScriptAndStyle": false
+      }
+    },
+    {
+      "files": "*.{css,scss,sass,less}",
+      "options": {
+        "parser": "css"
+      }
+    },
+    {
+      "files": "*.{html,htm}",
+      "options": {
+        "parser": "html"
+      }
+    },
+    {
+      "files": "*.{json,jsonc}",
+      "options": {
+        "parser": "json"
+      }
+    },
+    {
+      "files": "*.{md,markdown}",
+      "options": {
+        "parser": "markdown"
+      }
+    },
+    {
+      "files": "*.{yaml,yml}",
+      "options": {
+        "parser": "yaml"
+      }
+    }
+  ]
+}
